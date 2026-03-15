@@ -89,13 +89,13 @@ class CanvasArea(tk.Frame):
             activeforeground=C["text"],
             padx=8, pady=2,
         )
-        _btn("◄", self._prev_row).pack(side="left")
+        _btn("\u25c4", self._prev_row).pack(side="left")
         self._row_label = tk.Label(
-            nav, text="row —",
+            nav, text="row \u2014",
             font=("Segoe UI", 8), fg=C["text"], bg=C["nav"], width=12,
         )
         self._row_label.pack(side="left", padx=4)
-        _btn("►", self._next_row).pack(side="left")
+        _btn("\u25ba", self._next_row).pack(side="left")
 
         tk.Label(
             tb, text="Ctrl+scroll=zoom  Ctrl+Z=undo",
@@ -155,6 +155,7 @@ class CanvasArea(tk.Frame):
         base_ratio = min(CANVAS_MAX_W / ow, CANVAS_MAX_H / oh)
         base_nw    = max(int(ow * base_ratio), 1)
         base_nh    = max(int(oh * base_ratio), 1)
+        # scale_x/scale_y are pure image-to-base-display ratios, zoom-independent
         self._scale_x = ow / base_nw
         self._scale_y = oh / base_nh
 
@@ -181,7 +182,7 @@ class CanvasArea(tk.Frame):
     def _update_row_label(self) -> None:
         total = len(self.excel_data)
         self._row_label.config(
-            text=f"row {self._preview_idx + 1} / {total}" if total else "row —")
+            text=f"row {self._preview_idx + 1} / {total}" if total else "row \u2014")
 
     def _prev_row(self) -> None:
         if not self.excel_data:
@@ -248,7 +249,7 @@ class CanvasArea(tk.Frame):
 
         ph_img = render_placeholder(
             field, self.font_settings, self.available_fonts,
-            self.excel_data, self._scale_x, self._scale_y,
+            self.excel_data, self._scale_x, self._scale_y, self._zoom,
         )
         self.excel_data = saved
 
@@ -278,8 +279,20 @@ class CanvasArea(tk.Frame):
             self.draw_placeholder(field, p["x"], p["y"])
 
     def get_scaled_positions(self) -> dict:
+        """
+        Convert canvas (display) coordinates back to original image coordinates.
+
+        Canvas positions are stored at zoomed display space. We need to undo
+        the zoom first, then apply the base scale to get pixel coordinates in
+        the original full-resolution image.
+
+            original_px = canvas_pos / zoom * scale
+        """
         return {
-            f: (d["x"] * self._scale_x, d["y"] * self._scale_y)
+            f: (
+                d["x"] / self._zoom * self._scale_x,
+                d["y"] / self._zoom * self._scale_y,
+            )
             for f, d in self._placeholders.items()
         }
 
