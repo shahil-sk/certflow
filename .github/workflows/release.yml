@@ -20,10 +20,8 @@ jobs:
         include:
           - os: windows-latest
             label: windows
-            # PyInstaller on Windows names the binary with .exe automatically
             binary_path: dist/CertWizard.exe
             final_name: CertWizard-windows.exe
-            # Windows path separator inside --add-data is a semicolon
             sep: ";"
 
           - os: ubuntu-22.04
@@ -59,23 +57,17 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-      # Bundle the app into a single self-contained file.
-      #
-      # --onefile      -- everything packed into one binary, no _internal/ folder
-      # --windowed     -- suppresses the console window on Windows/macOS
-      # --add-data     -- embeds the fonts dir and the two PDF templates so
-      #                   they are accessible at runtime via sys._MEIPASS
-      # --hidden-import -- modules that PyInstaller misses via static analysis
-      #
-      # Note: arialbd.ttf lives in the repo root, not in fonts/, so it needs
-      # its own --add-data entry pointing to "."
-      - name: Build (Linux — needs xvfb for Tk display)
+      # Invoking via "python -m PyInstaller" guarantees we use the binary
+      # that belongs to the active interpreter on every runner OS, avoiding
+      # the PATH lookup issues that break bare "pyinstaller" on Windows and
+      # macOS GitHub-hosted runners.
+      - name: Build (Linux - needs xvfb for Tk display)
         if: matrix.label == 'linux'
         run: |
-          xvfb-run pyinstaller \
+          xvfb-run python -m PyInstaller \
             --onefile \
             --windowed \
             --name CertWizard \
@@ -89,24 +81,42 @@ jobs:
             --hidden-import reportlab \
             generate.py
 
-      - name: Build (Windows / macOS)
-        if: matrix.label != 'linux'
-        run: >
-          pyinstaller
-          --onefile
-          --windowed
-          --name CertWizard
-          "--add-data=fonts${{ matrix.sep }}fonts"
-          "--add-data=arialbd.ttf${{ matrix.sep }}."
-          "--add-data=cert_vertical.pdf${{ matrix.sep }}."
-          "--add-data=cert_horizontal.pdf${{ matrix.sep }}."
-          --hidden-import pandas
-          --hidden-import openpyxl
-          --hidden-import PyPDF2
-          --hidden-import reportlab
-          generate.py
+      - name: Build (Windows)
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --onefile `
+            --windowed `
+            --name CertWizard `
+            "--add-data=fonts${{ matrix.sep }}fonts" `
+            "--add-data=arialbd.ttf${{ matrix.sep }}." `
+            "--add-data=cert_vertical.pdf${{ matrix.sep }}." `
+            "--add-data=cert_horizontal.pdf${{ matrix.sep }}." `
+            --hidden-import pandas `
+            --hidden-import openpyxl `
+            --hidden-import PyPDF2 `
+            --hidden-import reportlab `
+            generate.py
 
-      # Quick sanity check — bail early if the binary is missing or tiny.
+      - name: Build (macOS)
+        if: matrix.label == 'macos'
+        run: |
+          python -m PyInstaller \
+            --onefile \
+            --windowed \
+            --name CertWizard \
+            --add-data "fonts${{ matrix.sep }}fonts" \
+            --add-data "arialbd.ttf${{ matrix.sep }}." \
+            --add-data "cert_vertical.pdf${{ matrix.sep }}." \
+            --add-data "cert_horizontal.pdf${{ matrix.sep }}." \
+            --hidden-import pandas \
+            --hidden-import openpyxl \
+            --hidden-import PyPDF2 \
+            --hidden-import reportlab \
+            generate.py
+
+      # Quick sanity check - bail early if the binary is missing or tiny.
       - name: Verify binary
         shell: bash
         run: |
@@ -117,7 +127,7 @@ jobs:
           SIZE=$(wc -c < "${{ matrix.binary_path }}")
           echo "Binary size: $SIZE bytes"
           if [ "$SIZE" -lt 1000000 ]; then
-            echo "Binary is suspiciously small — build likely failed silently"
+            echo "Binary is suspiciously small - build likely failed silently"
             exit 1
           fi
 
