@@ -25,6 +25,21 @@ from app.ui.dialogs import show_preview, pick_color_rgb, pick_color_cmyk
 _DEFAULT_ALIGN = "center"
 
 
+def _make_field_settings(default_font: str) -> dict:
+    """Return a fresh font_settings sub-dict for one field."""
+    return {
+        "size":           tk.IntVar(value=DEFAULT_FONT_SIZE),
+        "color":          tk.StringVar(value="#000000"),
+        "font_name":      tk.StringVar(value=default_font),
+        "align":          tk.StringVar(value=_DEFAULT_ALIGN),
+        "opacity":        tk.IntVar(value=100),
+        "shadow":         tk.BooleanVar(value=False),
+        "shadow_offset":  tk.IntVar(value=4),
+        "outline":        tk.BooleanVar(value=False),
+        "outline_width":  tk.IntVar(value=2),
+    }
+
+
 class CertificateApp:
 
     def __init__(self, root: tk.Tk):
@@ -49,7 +64,6 @@ class CertificateApp:
         self._build_ui()
         self._set_icon()
 
-    # ------------------------------------------------------------------
     def _build_ui(self):
         NavBar(
             self.root,
@@ -59,24 +73,20 @@ class CertificateApp:
             load_excel_cmd=self.load_excel,
         )
         self._status_bar = StatusBar(self.root)
-
         body = tk.Frame(self.root, bg=C["bg"])
         body.pack(fill="both", expand=True, padx=12, pady=(0, 6))
-
         self._panel = ControlPanel(
             body,
             preview_cmd=self.preview_certificate,
             generate_cmd=self.generate_certificates,
         )
-        self._field_list = FieldList(self._panel.fields_frame)
+        self._field_list  = FieldList(self._panel.fields_frame)
         self._canvas_area = CanvasArea(body)
 
-    # ------------------------------------------------------------------
     def _set_icon(self):
         for p in map(resource_path,
                      ("certgen.ico", "certgen.png", "icon.ico", "icon.png")):
-            if not os.path.exists(p):
-                continue
+            if not os.path.exists(p): continue
             try:
                 if platform.system() == "Windows" and p.endswith(".ico"):
                     self.root.iconbitmap(p)
@@ -88,12 +98,11 @@ class CertificateApp:
             except Exception:
                 pass
 
-    # ------------------------------------------------------------------
     def _status(self, msg: str, ok: bool = True) -> None:
         self._status_bar.set(msg, ok)
         self.root.update_idletasks()
 
-    def _log(self, msg: str, clear: bool = False) -> None:
+    def _log(self, msg, clear=False):
         self.root.after(0, lambda m=msg, c=clear: self._panel.append_log(m, c))
 
     # ------------------------------------------------------------------
@@ -102,8 +111,7 @@ class CertificateApp:
             file_path = filedialog.askopenfilename(
                 title="Select certificate template",
                 filetypes=[("Images", "*.png *.jpg *.jpeg")])
-        if not file_path:
-            return
+        if not file_path: return
         try:
             self.template_path  = file_path
             self.original_image = Image.open(file_path).convert("RGBA")
@@ -114,14 +122,12 @@ class CertificateApp:
         except Exception as exc:
             messagebox.showerror("Error", f"Cannot load template:\n{exc}")
 
-    # ------------------------------------------------------------------
     def load_excel(self, file_path=None):
         if not file_path:
             file_path = filedialog.askopenfilename(
                 title="Select data file",
                 filetypes=[("Excel / CSV", "*.xlsx *.csv")])
-        if not file_path:
-            return
+        if not file_path: return
         try:
             header, rows = excel_loader.read(file_path)
         except Exception as exc:
@@ -134,14 +140,7 @@ class CertificateApp:
 
         default_font = next(iter(self.available_fonts))
         self.field_vars    = {f: tk.BooleanVar(value=True) for f in header}
-        self.font_settings = {
-            f: {
-                "size":      tk.IntVar(value=DEFAULT_FONT_SIZE),
-                "color":     tk.StringVar(value="#000000"),
-                "font_name": tk.StringVar(value=default_font),
-                "align":     tk.StringVar(value=_DEFAULT_ALIGN),
-            } for f in header
-        }
+        self.font_settings = {f: _make_field_settings(default_font) for f in header}
 
         self._canvas_area.font_settings   = self.font_settings
         self._canvas_area.available_fonts = self.available_fonts
@@ -154,21 +153,18 @@ class CertificateApp:
             update_cb=self._on_field_update,
             color_cb=self._on_pick_color,
         )
-
         if self.original_image:
             for f in self.fields:
                 self._canvas_area.create_placeholder(f)
 
         ext = os.path.splitext(file_path)[1].upper()
-        self._status(
-            f"{ext} loaded: {len(rows)} records, {len(header)} fields")
+        self._status(f"{ext} loaded: {len(rows)} records, {len(header)} fields")
 
-    # ------------------------------------------------------------------
-    def _on_field_update(self, field: str) -> None:
+    def _on_field_update(self, field):
         self._canvas_area.update_placeholder(field)
-        self._status(f"Updated field: {field}")
+        self._status(f"Updated: {field}")
 
-    def _on_pick_color(self, field: str) -> None:
+    def _on_pick_color(self, field):
         if self.color_space.get() == "RGB":
             pick_color_rgb(self.root, field, self.font_settings)
         else:
@@ -184,14 +180,11 @@ class CertificateApp:
             except Exception:
                 pass
 
-    # ------------------------------------------------------------------
     def preview_certificate(self):
         if not self.original_image:
-            messagebox.showwarning("CertWizard", "Load a template first.")
-            return
+            messagebox.showwarning("CertWizard", "Load a template first."); return
         if not self.excel_data:
-            messagebox.showwarning("CertWizard", "Load student data first.")
-            return
+            messagebox.showwarning("CertWizard", "Load student data first."); return
         from app.image_renderer import draw_text_on_image
         img = draw_text_on_image(
             self.original_image.copy(),
@@ -201,27 +194,20 @@ class CertificateApp:
         )
         show_preview(self.root, img)
 
-    # ------------------------------------------------------------------
     def generate_certificates(self):
         if not self.excel_data:
-            messagebox.showwarning("CertWizard", "Load student data first.")
-            return
+            messagebox.showwarning("CertWizard", "Load student data first."); return
         if not self.original_image:
-            messagebox.showwarning("CertWizard", "Load a template first.")
-            return
+            messagebox.showwarning("CertWizard", "Load a template first."); return
         if not self._gen_lock.acquire(blocking=False):
-            messagebox.showwarning("CertWizard", "Generation already in progress.")
-            return
+            messagebox.showwarning("CertWizard", "Generation already in progress."); return
 
         use_cmyk = messagebox.askyesno(
-            "Color mode",
-            "Generate in CMYK color space?\n\nYes = CMYK    No = RGB")
+            "Color mode", "Generate in CMYK?\n\nYes = CMYK    No = RGB")
         self.color_space.set("CMYK" if use_cmyk else "RGB")
-
         out_dir = filedialog.askdirectory(title="Select output folder")
         if not out_dir:
-            self._gen_lock.release()
-            return
+            self._gen_lock.release(); return
 
         generator.run(
             excel_data=self.excel_data,
@@ -240,16 +226,14 @@ class CertificateApp:
                 0, lambda m=msg, c=clr: self._panel.append_log(m, c)),
             on_done=lambda cnt, tot: self.root.after(
                 0, lambda: messagebox.showinfo(
-                    "CertWizard",
-                    f"{cnt} certificate(s) generated successfully.")),
+                    "CertWizard", f"{cnt} certificate(s) generated!")),
             lock=self._gen_lock,
         )
 
     # ------------------------------------------------------------------
     def save_project(self):
         if not self.original_image:
-            messagebox.showwarning("Warning", "No template loaded.")
-            return
+            messagebox.showwarning("Warning", "No template loaded."); return
         try:
             data = project_io.serialise(
                 template_path=self.template_path,
@@ -273,44 +257,38 @@ class CertificateApp:
     def load_project(self):
         path = filedialog.askopenfilename(
             filetypes=[("CertWizard Project", "*.certwiz")])
-        if not path:
-            return
+        if not path: return
         try:
             data = project_io.load(path)
         except Exception as exc:
-            messagebox.showerror("Error", f"Load failed:\n{exc}")
-            return
+            messagebox.showerror("Error", f"Load failed:\n{exc}"); return
 
         self._canvas_area.clear()
-
         tpl = data.get("template_path", "")
-        if tpl and os.path.exists(tpl):
-            self.load_template(tpl)
-        elif tpl:
-            messagebox.showwarning("Warning", f"Template not found:\n{tpl}")
-
+        if tpl and os.path.exists(tpl):   self.load_template(tpl)
+        elif tpl: messagebox.showwarning("Warning", f"Template not found:\n{tpl}")
         xl = data.get("excel_path", "")
-        if xl and os.path.exists(xl):
-            self.load_excel(xl)
-        elif xl:
-            messagebox.showwarning("Warning", f"Excel file not found:\n{xl}")
+        if xl and os.path.exists(xl):     self.load_excel(xl)
+        elif xl: messagebox.showwarning("Warning", f"Excel not found:\n{xl}")
 
         self.color_space.set(data.get("color_space", "RGB"))
-        self._panel.filename_pattern.set(
-            data.get("filename_pattern", ""))
+        self._panel.filename_pattern.set(data.get("filename_pattern", ""))
 
         fs = data.get("field_settings", {})
         for f in self.fields:
-            if f in fs:
-                self.font_settings[f]["size"].set(
-                    fs[f].get("size", DEFAULT_FONT_SIZE))
-                self.font_settings[f]["color"].set(
-                    fs[f].get("color", "#000000"))
-                self.font_settings[f]["font_name"].set(
-                    fs[f].get("font_name", next(iter(self.available_fonts))))
-                self.font_settings[f]["align"].set(
-                    fs[f].get("align", _DEFAULT_ALIGN))
-                self.field_vars[f].set(fs[f].get("visible", True))
+            if f not in fs: continue
+            d = fs[f]
+            self.font_settings[f]["size"].set(d.get("size",     DEFAULT_FONT_SIZE))
+            self.font_settings[f]["color"].set(d.get("color",   "#000000"))
+            self.font_settings[f]["font_name"].set(
+                d.get("font_name", next(iter(self.available_fonts))))
+            self.font_settings[f]["align"].set(d.get("align",   _DEFAULT_ALIGN))
+            self.font_settings[f]["opacity"].set(d.get("opacity", 100))
+            self.font_settings[f]["shadow"].set(d.get("shadow",  False))
+            self.font_settings[f]["shadow_offset"].set(d.get("shadow_offset", 4))
+            self.font_settings[f]["outline"].set(d.get("outline", False))
+            self.font_settings[f]["outline_width"].set(d.get("outline_width", 2))
+            self.field_vars[f].set(d.get("visible", True))
 
         for field, (sx, sy) in data.get("positions", {}).items():
             if field in self.fields:
@@ -319,10 +297,9 @@ class CertificateApp:
                     sx / self._canvas_area.scale_x,
                     sy / self._canvas_area.scale_y,
                 )
-
         messagebox.showinfo("Loaded", "Project loaded.")
 
-    # ------------------------------------------------------------------
+    # legacy aliases
     def _update_status(self, msg): self._status(msg)
     def update_status(self, msg):  self._status(msg)
     def update_info(self, msg, clear=False): self._log(msg, clear)
