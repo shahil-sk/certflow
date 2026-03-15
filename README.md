@@ -1,5 +1,3 @@
-<![CDATA[<div align="center">
-
 # CertWizard
 
 **Bulk certificate generation, done right.**
@@ -155,4 +153,3 @@ See [CHANGES.md](CHANGES.md) for the full version history.
 
 Developed by [Shahil SK](https://github.com/shahil-sk).
 Uses Pillow, openpyxl, fpdf2, and Tkinter.
-]]>
