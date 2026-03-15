@@ -1,13 +1,10 @@
 # PyInstaller spec – optimised for smallest binary
 # Usage:  pyinstaller build.spec
 
-import os
-from PyInstaller.utils.hooks import collect_data_files
-
 block_cipher = None
 
 a = Analysis(
-    ['certgen.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=[
@@ -15,26 +12,30 @@ a = Analysis(
         ('certgen.png',  '.'),
         ('fonts',        'fonts'),
     ],
-    hiddenimports=[],
+    hiddenimports=['PIL', 'openpyxl', 'fpdf'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Exclude heavy, unused packages to shrink binary
+    # Only exclude things that are genuinely unreachable from this app.
+    # Do NOT exclude email/html/http/urllib — fpdf2 uses them internally.
     excludes=[
         'matplotlib', 'numpy', 'pandas', 'scipy',
         'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
         'wx', 'gi', 'gtk',
         'IPython', 'notebook', 'jupyter',
         'docutils', 'sphinx',
-        'cryptography', 'ssl',
-        'email', 'html', 'http', 'urllib',
+        'cryptography',
         'unittest', 'test',
         'tkinter.test',
-        'colorsys',   # not used any more
-        'ttkthemes',  # dropped; using built-in ttk
+        'xmlrpc',
+        'pydoc',
+        'distutils',
+        'lib2to3',
+        'colorsys',
+        'ttkthemes',
     ],
     noarchive=False,
-    optimize=2,   # strip docstrings + asserts
+    optimize=2,
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -49,15 +50,15 @@ exe = EXE(
     name='CertWizard',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,          # strip debug symbols
-    upx=True,            # compress with UPX if available
+    strip=True,
+    upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,       # no console window
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon='certgen.ico',
-    onefile=True,        # single-file portable exe
+    onefile=True,
 )
