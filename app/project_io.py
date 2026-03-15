@@ -1,6 +1,6 @@
 """
 Project file save / load (the .certwiz JSON format).
-No UI calls here — caller is responsible for showing dialogs.
+Version 2.3 — adds filename_pattern.
 """
 import json
 from datetime import datetime
@@ -14,16 +14,17 @@ def serialise(
     fields: list,
     font_settings: dict,
     field_vars: dict,
+    filename_pattern: str = "",
 ) -> dict:
-    """Return a plain dict ready for json.dump."""
     return {
-        "version":        "2.2",
-        "last_modified":  datetime.now().isoformat(),
-        "template_path":  template_path,
-        "excel_path":     excel_path,
-        "color_space":    color_space,
-        "positions":      positions,
-        "field_settings": {
+        "version":          "2.3",
+        "last_modified":    datetime.now().isoformat(),
+        "template_path":    template_path,
+        "excel_path":       excel_path,
+        "color_space":      color_space,
+        "filename_pattern": filename_pattern,
+        "positions":        positions,
+        "field_settings":   {
             f: {
                 "size":      font_settings[f]["size"].get(),
                 "color":     font_settings[f]["color"].get(),

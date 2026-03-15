@@ -1,8 +1,5 @@
 """
 CertificateApp  -- the top-level controller.
-
-Wires together all UI components and domain modules.
-Contains no raw widget creation beyond what belongs here.
 """
 import os
 import platform
@@ -36,7 +33,6 @@ class CertificateApp:
         self.root.minsize(980, 640)
         self.root.configure(bg=C["bg"])
 
-        # domain state
         self.original_image  = None
         self.template_path   = None
         self.excel_path      = None
@@ -53,8 +49,6 @@ class CertificateApp:
         self._build_ui()
         self._set_icon()
 
-    # ------------------------------------------------------------------
-    # UI assembly
     # ------------------------------------------------------------------
     def _build_ui(self):
         NavBar(
@@ -75,11 +69,8 @@ class CertificateApp:
             generate_cmd=self.generate_certificates,
         )
         self._field_list = FieldList(self._panel.fields_frame)
-
         self._canvas_area = CanvasArea(body)
 
-    # ------------------------------------------------------------------
-    # Icon
     # ------------------------------------------------------------------
     def _set_icon(self):
         for p in map(resource_path,
@@ -98,18 +89,13 @@ class CertificateApp:
                 pass
 
     # ------------------------------------------------------------------
-    # Status / log helpers
-    # ------------------------------------------------------------------
-    def _status(self, msg: str) -> None:
-        self._status_bar.set(msg)
+    def _status(self, msg: str, ok: bool = True) -> None:
+        self._status_bar.set(msg, ok)
         self.root.update_idletasks()
 
     def _log(self, msg: str, clear: bool = False) -> None:
-        self.root.after(
-            0, lambda m=msg, c=clear: self._panel.append_log(m, c))
+        self.root.after(0, lambda m=msg, c=clear: self._panel.append_log(m, c))
 
-    # ------------------------------------------------------------------
-    # Template loading
     # ------------------------------------------------------------------
     def load_template(self, file_path=None):
         if not file_path:
@@ -129,13 +115,11 @@ class CertificateApp:
             messagebox.showerror("Error", f"Cannot load template:\n{exc}")
 
     # ------------------------------------------------------------------
-    # Excel loading
-    # ------------------------------------------------------------------
     def load_excel(self, file_path=None):
         if not file_path:
             file_path = filedialog.askopenfilename(
-                title="Select Excel file",
-                filetypes=[("Excel", "*.xlsx")])
+                title="Select data file",
+                filetypes=[("Excel / CSV", "*.xlsx *.csv")])
         if not file_path:
             return
         try:
@@ -149,7 +133,7 @@ class CertificateApp:
         self.excel_data  = rows
 
         default_font = next(iter(self.available_fonts))
-        self.field_vars   = {f: tk.BooleanVar(value=True) for f in header}
+        self.field_vars    = {f: tk.BooleanVar(value=True) for f in header}
         self.font_settings = {
             f: {
                 "size":      tk.IntVar(value=DEFAULT_FONT_SIZE),
@@ -159,7 +143,6 @@ class CertificateApp:
             } for f in header
         }
 
-        # Push state into canvas so it can render placeholders
         self._canvas_area.font_settings   = self.font_settings
         self._canvas_area.available_fonts = self.available_fonts
         self._canvas_area.excel_data      = self.excel_data
@@ -176,10 +159,10 @@ class CertificateApp:
             for f in self.fields:
                 self._canvas_area.create_placeholder(f)
 
-        self._status(f"Excel loaded: {len(rows)} records, {len(header)} fields")
+        ext = os.path.splitext(file_path)[1].upper()
+        self._status(
+            f"{ext} loaded: {len(rows)} records, {len(header)} fields")
 
-    # ------------------------------------------------------------------
-    # Field callbacks
     # ------------------------------------------------------------------
     def _on_field_update(self, field: str) -> None:
         self._canvas_area.update_placeholder(field)
@@ -202,8 +185,6 @@ class CertificateApp:
                 pass
 
     # ------------------------------------------------------------------
-    # Preview
-    # ------------------------------------------------------------------
     def preview_certificate(self):
         if not self.original_image:
             messagebox.showwarning("CertWizard", "Load a template first.")
@@ -211,7 +192,6 @@ class CertificateApp:
         if not self.excel_data:
             messagebox.showwarning("CertWizard", "Load student data first.")
             return
-
         from app.image_renderer import draw_text_on_image
         img = draw_text_on_image(
             self.original_image.copy(),
@@ -221,8 +201,6 @@ class CertificateApp:
         )
         show_preview(self.root, img)
 
-    # ------------------------------------------------------------------
-    # Generation
     # ------------------------------------------------------------------
     def generate_certificates(self):
         if not self.excel_data:
@@ -237,7 +215,7 @@ class CertificateApp:
 
         use_cmyk = messagebox.askyesno(
             "Color mode",
-            "Generate in CMYK color space?\n\nYes  =  CMYK    No  =  RGB")
+            "Generate in CMYK color space?\n\nYes = CMYK    No = RGB")
         self.color_space.set("CMYK" if use_cmyk else "RGB")
 
         out_dir = filedialog.askdirectory(title="Select output folder")
@@ -255,6 +233,7 @@ class CertificateApp:
             positions=self._canvas_area.get_scaled_positions(),
             out_dir=out_dir,
             color_mode="CMYK" if use_cmyk else "RGB",
+            filename_pattern=self._panel.filename_pattern.get(),
             on_progress=lambda pct: self.root.after(
                 0, lambda v=pct: self._panel.set_progress(v)),
             on_log=lambda msg, clr: self.root.after(
@@ -266,8 +245,6 @@ class CertificateApp:
             lock=self._gen_lock,
         )
 
-    # ------------------------------------------------------------------
-    # Project save / load
     # ------------------------------------------------------------------
     def save_project(self):
         if not self.original_image:
@@ -282,6 +259,7 @@ class CertificateApp:
                 fields=self.fields,
                 font_settings=self.font_settings,
                 field_vars=self.field_vars,
+                filename_pattern=self._panel.filename_pattern.get(),
             )
             path = filedialog.asksaveasfilename(
                 defaultextension=".certwiz",
@@ -318,12 +296,16 @@ class CertificateApp:
             messagebox.showwarning("Warning", f"Excel file not found:\n{xl}")
 
         self.color_space.set(data.get("color_space", "RGB"))
+        self._panel.filename_pattern.set(
+            data.get("filename_pattern", ""))
 
         fs = data.get("field_settings", {})
         for f in self.fields:
             if f in fs:
-                self.font_settings[f]["size"].set(fs[f].get("size", DEFAULT_FONT_SIZE))
-                self.font_settings[f]["color"].set(fs[f].get("color", "#000000"))
+                self.font_settings[f]["size"].set(
+                    fs[f].get("size", DEFAULT_FONT_SIZE))
+                self.font_settings[f]["color"].set(
+                    fs[f].get("color", "#000000"))
                 self.font_settings[f]["font_name"].set(
                     fs[f].get("font_name", next(iter(self.available_fonts))))
                 self.font_settings[f]["align"].set(
@@ -340,8 +322,6 @@ class CertificateApp:
 
         messagebox.showinfo("Loaded", "Project loaded.")
 
-    # ------------------------------------------------------------------
-    # Legacy aliases
     # ------------------------------------------------------------------
     def _update_status(self, msg): self._status(msg)
     def update_status(self, msg):  self._status(msg)

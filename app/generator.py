@@ -1,11 +1,16 @@
 """
 Certificate generation worker.
 Runs on a background thread; communicates back via callbacks.
+Features:
+  - PDF output via fpdf
+  - Configurable filename pattern with {field} tokens
+  - Duplicate detection (warns before generating)
 """
 import io
 import os
 import re
 import threading
+from collections import Counter
 
 from fpdf import FPDF
 from PIL import Image
@@ -17,21 +22,23 @@ _TOKEN_RE = re.compile(r"\{(\w+)\}")
 
 
 def _build_filename(pattern: str, student: dict, idx: int, fields: list) -> str:
-    """
-    Replace {field_name} tokens with student values.
-    Falls back to first two fields if pattern is empty.
-    """
     if pattern and pattern.strip():
         def _repl(m):
-            key = m.group(1).lower()
-            val = student.get(key, "")
+            val = student.get(m.group(1).lower(), "")
             return safe_filename(val) if val else m.group(0)
         name = _TOKEN_RE.sub(_repl, pattern.strip())
-        name = name or f"cert_{idx + 1}"
-    else:
-        parts = [student.get(fields[i], "") for i in range(min(2, len(fields)))]
-        name  = safe_filename(*parts) or f"cert_{idx + 1}"
-    return name
+        return name or f"cert_{idx + 1}"
+    parts = [student.get(fields[i], "") for i in range(min(2, len(fields)))]
+    return safe_filename(*parts) or f"cert_{idx + 1}"
+
+
+def _find_duplicates(excel_data: list, fields: list) -> list:
+    """Return list of (value, count, field) for any duplicates in col 0."""
+    if not fields:
+        return []
+    key = fields[0]
+    counts = Counter(r.get(key, "").strip() for r in excel_data)
+    return [(v, c, key) for v, c in counts.items() if c > 1 and v]
 
 
 def run(
@@ -43,12 +50,12 @@ def run(
     original_image: Image.Image,
     positions: dict,
     out_dir: str,
-    color_mode: str,          # "RGB" or "CMYK"
-    on_progress,              # callable(pct: float)
-    on_log,                   # callable(msg: str, clear: bool)
-    on_done,                  # callable(count: int, total: int)
+    color_mode: str,
+    on_progress,
+    on_log,
+    on_done,
     lock: threading.Lock,
-    filename_pattern: str = "",   # e.g. "{name}_{date}"
+    filename_pattern: str = "",
 ) -> None:
     """Start generation on a daemon thread and return immediately."""
 
@@ -64,7 +71,18 @@ def run(
         count = 0
         on_log("Starting generation...", True)
         on_log(f"Records: {total}   Mode: {sub}   Output: {out_dir}", False)
-        on_log(f"Filename pattern: {filename_pattern or '(default)'}", False)
+        if filename_pattern:
+            on_log(f"Filename pattern: {filename_pattern}", False)
+
+        # ── Duplicate detection
+        dupes = _find_duplicates(excel_data, fields)
+        if dupes:
+            on_log(f"[warn] {len(dupes)} duplicate value(s) in '{fields[0]}':", False)
+            for val, cnt, _ in dupes[:5]:   # show first 5
+                on_log(f"  • '{val}'  ×{cnt}", False)
+            if len(dupes) > 5:
+                on_log(f"  ... and {len(dupes) - 5} more", False)
+
         on_log("-" * 44, False)
 
         for idx, student in enumerate(excel_data):
