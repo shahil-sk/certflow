@@ -1,18 +1,13 @@
 name: Build and Release
 
-# Push a semver tag to trigger the full build + release pipeline.
-# Manual dispatch is available for testing builds without a release.
+# Trigger on semver tags like v1.0 or v1.0.0.
+# workflow_dispatch lets you do a test build without pushing a release tag.
 on:
   push:
     tags:
       - "v*.*"
       - "v*.*.*"
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag (e.g. v2.2) — only used for release name"
-        required: false
-        default: ""
 
 jobs:
   build:
@@ -25,18 +20,23 @@ jobs:
         include:
           - os: windows-latest
             label: windows
-            final_name: CertWizard-windows.exe
+            # PyInstaller on Windows names the binary with .exe automatically
             binary_path: dist/CertWizard.exe
+            final_name: CertWizard-windows.exe
+            # Windows path separator inside --add-data is a semicolon
+            sep: ";"
 
           - os: ubuntu-22.04
             label: linux
-            final_name: CertWizard-linux
             binary_path: dist/CertWizard
+            final_name: CertWizard-linux
+            sep: ":"
 
           - os: macos-latest
             label: macos
-            final_name: CertWizard-macos
             binary_path: dist/CertWizard
+            final_name: CertWizard-macos
+            sep: ":"
 
     steps:
       - name: Checkout
@@ -48,63 +48,76 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      # -----------------------------------------------------------------------
-      # Linux: Tkinter is a separate system package on Ubuntu.
-      # xvfb gives a virtual display so Tk can initialise during collection.
-      # UPX is installed for binary compression.
-      # -----------------------------------------------------------------------
-      - name: Install system dependencies (Linux)
+      # Tkinter ships as a separate system package on Ubuntu.
+      # xvfb provides a virtual display so Tk can initialise during
+      # PyInstaller's collection phase without a real screen.
+      - name: Install system packages (Linux only)
         if: matrix.label == 'linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y python3-tk xvfb upx-ucl
-
-      # macOS: UPX via Homebrew
-      - name: Install UPX (macOS)
-        if: matrix.label == 'macos'
-        run: brew install upx
-
-      # Windows: UPX via choco
-      - name: Install UPX (Windows)
-        if: matrix.label == 'windows'
-        run: choco install upx --no-progress -y
-        shell: pwsh
+          sudo apt-get install -y python3-tk xvfb
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt
 
-      # -----------------------------------------------------------------------
-      # Build using the .spec file.
-      # The spec explicitly lists every hidden import and collected data file
-      # so the binary is fully self-contained — zero runtime dependencies.
-      # Linux wraps the command in xvfb-run so Tkinter can open a display
-      # during PyInstaller's module collection phase.
-      # -----------------------------------------------------------------------
-      - name: Build standalone binary (Linux)
+      # Bundle the app into a single self-contained file.
+      #
+      # --onefile      -- everything packed into one binary, no _internal/ folder
+      # --windowed     -- suppresses the console window on Windows/macOS
+      # --add-data     -- embeds the fonts dir and the two PDF templates so
+      #                   they are accessible at runtime via sys._MEIPASS
+      # --hidden-import -- modules that PyInstaller misses via static analysis
+      #
+      # Note: arialbd.ttf lives in the repo root, not in fonts/, so it needs
+      # its own --add-data entry pointing to "."
+      - name: Build (Linux — needs xvfb for Tk display)
         if: matrix.label == 'linux'
-        run: xvfb-run pyinstaller certwizard.spec --clean --noconfirm
+        run: |
+          xvfb-run pyinstaller \
+            --onefile \
+            --windowed \
+            --name CertWizard \
+            --add-data "fonts${{ matrix.sep }}fonts" \
+            --add-data "arialbd.ttf${{ matrix.sep }}." \
+            --add-data "cert_vertical.pdf${{ matrix.sep }}." \
+            --add-data "cert_horizontal.pdf${{ matrix.sep }}." \
+            --hidden-import pandas \
+            --hidden-import openpyxl \
+            --hidden-import PyPDF2 \
+            --hidden-import reportlab \
+            generate.py
 
-      - name: Build standalone binary (Windows / macOS)
+      - name: Build (Windows / macOS)
         if: matrix.label != 'linux'
-        run: pyinstaller certwizard.spec --clean --noconfirm
+        run: >
+          pyinstaller
+          --onefile
+          --windowed
+          --name CertWizard
+          "--add-data=fonts${{ matrix.sep }}fonts"
+          "--add-data=arialbd.ttf${{ matrix.sep }}."
+          "--add-data=cert_vertical.pdf${{ matrix.sep }}."
+          "--add-data=cert_horizontal.pdf${{ matrix.sep }}."
+          --hidden-import pandas
+          --hidden-import openpyxl
+          --hidden-import PyPDF2
+          --hidden-import reportlab
+          generate.py
 
-      # -----------------------------------------------------------------------
-      # Smoke-test: verify the binary exists and is non-zero in size.
-      # On Linux we also confirm no external .so files leaked outside the exe.
-      # -----------------------------------------------------------------------
-      - name: Verify binary exists
+      # Quick sanity check — bail early if the binary is missing or tiny.
+      - name: Verify binary
         shell: bash
         run: |
           if [ ! -f "${{ matrix.binary_path }}" ]; then
-            echo "Binary not found at ${{ matrix.binary_path }}"
+            echo "Expected binary not found: ${{ matrix.binary_path }}"
             exit 1
           fi
           SIZE=$(wc -c < "${{ matrix.binary_path }}")
           echo "Binary size: $SIZE bytes"
           if [ "$SIZE" -lt 1000000 ]; then
-            echo "Binary is suspiciously small — build may have failed silently"
+            echo "Binary is suspiciously small — build likely failed silently"
             exit 1
           fi
 
@@ -117,52 +130,35 @@ jobs:
         with:
           name: ${{ matrix.final_name }}
           path: dist/${{ matrix.final_name }}
-          retention-days: 1
+          retention-days: 3
 
   release:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
+    # only run this job when a real tag was pushed, not on workflow_dispatch
     if: startsWith(github.ref, 'refs/tags/')
 
     permissions:
       contents: write
 
     steps:
-      - name: Checkout (for CHANGES.md)
-        uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
 
-      # Confirm all three binaries landed before we publish anything.
-      - name: Verify all artifacts present
+      # Make sure none of the three builds silently skipped uploading.
+      - name: Confirm all three binaries are present
         run: |
           for f in CertWizard-windows.exe CertWizard-linux CertWizard-macos; do
             if [ ! -f "release-assets/$f" ]; then
-              echo "Missing artifact: $f"
+              echo "Missing: $f"
               exit 1
             fi
           done
           ls -lh release-assets/
-
-      - name: Extract release notes from CHANGES.md
-        id: notes
-        run: |
-          python3 - <<'EOF'
-          import re, os
-
-          text = open("CHANGES.md").read()
-          # Split on every '## ' heading; index 1 is the most recent block.
-          blocks = re.split(r"(?=^## )", text, flags=re.MULTILINE)
-          body = blocks[1].strip() if len(blocks) > 1 else text.strip()
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"body<<NOTES_EOF\n{body}\nNOTES_EOF\n")
-          EOF
 
       - name: Resolve tag name
         id: tag
@@ -173,7 +169,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: "CertWizard ${{ steps.tag.outputs.name }}"
-          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: true
           draft: false
           prerelease: ${{ contains(steps.tag.outputs.name, '-') }}
           files: |
