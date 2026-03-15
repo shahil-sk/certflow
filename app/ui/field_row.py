@@ -1,22 +1,17 @@
 """
-Single scrollable field list inside the control panel.
-Builds and rebuilds the per-field rows when Excel data changes.
+Scrollable field editor list in the sidebar.
+Each field gets: name+visibility, size+font+colour, alignment.
 """
 import tkinter as tk
 from tkinter import ttk
 
 from app.constants import C
-from app.ui.widgets import label
+from app.ui.widgets import label, hsep
 
-_ALIGN_OPTIONS = ["left", "center", "right"]
-_ALIGN_ICONS   = {"left": "\u2b05", "center": "\u2b0c", "right": "\u27a1"}  # ← ⬌ ➡
+_ALIGN_OPTIONS = [("L", "left"), ("C", "center"), ("R", "right")]
 
 
 class FieldList(tk.Frame):
-    """
-    Drop-in replacement for the old fields_frame_outer.
-    Call .rebuild(...) to refresh after Excel load.
-    """
 
     def __init__(self, parent):
         super().__init__(parent, bg=C["surface"])
@@ -34,141 +29,193 @@ class FieldList(tk.Frame):
         for w in self.winfo_children():
             w.destroy()
 
-        scroll_cv = tk.Canvas(
-            self, height=310, bg=C["surface"], highlightthickness=0)
-        vsb = ttk.Scrollbar(
-            self, orient="vertical", command=scroll_cv.yview,
-            style="Flat.Vertical.TScrollbar")
-        inner = tk.Frame(scroll_cv, bg=C["surface"])
-        inner.bind(
-            "<Configure>",
-            lambda e: scroll_cv.configure(
-                scrollregion=scroll_cv.bbox("all")),
-        )
-        scroll_cv.create_window((0, 0), window=inner, anchor="nw")
-        scroll_cv.configure(yscrollcommand=vsb.set)
+        # canvas + inner frame for scrolling
+        cv = tk.Canvas(self, height=340, bg=C["surface"],
+                       highlightthickness=0)
+        vsb = ttk.Scrollbar(self, orient="vertical", command=cv.yview,
+                            style="Dark.Vertical.TScrollbar")
+        inner = tk.Frame(cv, bg=C["surface"])
+        inner.bind("<Configure>",
+                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=vsb.set)
 
-        # bind mousewheel on the inner list
-        scroll_cv.bind("<Enter>",
-            lambda e, cv=scroll_cv: cv.bind_all(
-                "<MouseWheel>",
-                lambda ev: cv.yview_scroll(int(-1*(ev.delta/120)), "units")))
-        scroll_cv.bind("<Leave>",
-            lambda e, cv=scroll_cv: cv.unbind_all("<MouseWheel>"))
+        cv.bind("<Enter>", lambda e, c=cv: c.bind_all(
+            "<MouseWheel>",
+            lambda ev: c.yview_scroll(int(-1*(ev.delta/120)), "units")))
+        cv.bind("<Leave>", lambda e, c=cv: c.unbind_all("<MouseWheel>"))
 
         for i, field in enumerate(fields):
-            _FieldRow(inner, field, field_vars, font_settings,
-                      available_fonts, update_cb, color_cb,
-                      alt=(i % 2 == 1))
+            _FieldCard(inner, field, field_vars, font_settings,
+                       available_fonts, update_cb, color_cb,
+                       alt=(i % 2 == 1))
 
         vsb.pack(side="right", fill="y")
-        scroll_cv.pack(side="left", fill="both", expand=True)
+        cv.pack(side="left", fill="both", expand=True)
 
 
-class _FieldRow(tk.Frame):
-    """One row in the field list."""
+class _FieldCard(tk.Frame):
+    """One collapsible card per field."""
 
-    def __init__(
-        self, parent, field, field_vars, font_settings,
-        available_fonts, update_cb, color_cb, alt=False,
-    ):
+    def __init__(self, parent, field, field_vars, font_settings,
+                 available_fonts, update_cb, color_cb, alt=False):
         bg = C["row_alt"] if alt else C["surface"]
-        super().__init__(parent, bg=bg, pady=8, padx=12)
+        super().__init__(parent, bg=bg)
         self.pack(fill="x")
+        # 1-px bottom border
+        tk.Frame(self, bg=C["border"], height=1).pack(fill="x", side="bottom")
         self._build(field, field_vars, font_settings,
                     available_fonts, update_cb, color_cb, bg)
 
     def _build(self, field, field_vars, font_settings,
                available_fonts, update_cb, color_cb, bg):
+        pad = tk.Frame(self, bg=bg, padx=12, pady=8)
+        pad.pack(fill="x")
 
-        # ── Row 1: field name + visibility toggle ───────────────────────
-        top = tk.Frame(self, bg=bg)
-        top.pack(fill="x", pady=(0, 4))
-        label(top, field.title(), font_size=9, bold=True, bg=bg).pack(side="left")
-        label(top, "Visible", font_size=8, color=C["subtext"],
-              bg=bg).pack(side="right", padx=(0, 2))
-        tk.Checkbutton(
-            top, variable=field_vars[field],
-            bg=bg, activebackground=bg, relief="flat", bd=0,
-            command=lambda f=field: update_cb(f),
-        ).pack(side="right")
+        # ── Row 1: field name + visible toggle ───────────
+        r1 = tk.Frame(pad, bg=bg)
+        r1.pack(fill="x", pady=(0, 6))
 
-        # ── Row 2: size + font + colour ──────────────────────────────────
-        ctrl = tk.Frame(self, bg=bg)
-        ctrl.pack(fill="x", pady=(0, 4))
+        tk.Label(
+            r1, text=field.upper(),
+            font=("Segoe UI", 7, "bold"),
+            fg=C["accent"], bg=bg,
+        ).pack(side="left")
 
-        label(ctrl, "Size", font_size=8, color=C["subtext"], bg=bg).pack(side="left")
+        # visible toggle (custom look)
+        vis_frame = tk.Frame(r1, bg=bg)
+        vis_frame.pack(side="right")
+        tk.Label(vis_frame, text="show", font=("Segoe UI", 7),
+                 fg=C["subtext"], bg=bg).pack(side="left", padx=(0, 3))
+        _ToggleSwitch(vis_frame, field_vars[field],
+                      lambda f=field: update_cb(f), bg=bg).pack(side="left")
+
+        # ── Row 2: size spinbox + font combobox ──────────
+        r2 = tk.Frame(pad, bg=bg)
+        r2.pack(fill="x", pady=(0, 5))
+
+        tk.Label(r2, text="Sz", font=("Segoe UI", 7),
+                 fg=C["subtext"], bg=bg).pack(side="left")
         spin = tk.Spinbox(
-            ctrl, from_=8, to=300, width=4,
+            r2, from_=6, to=300, width=4,
             textvariable=font_settings[field]["size"],
-            font=("Segoe UI", 9), relief="flat", bd=1,
+            font=("Segoe UI", 8),
+            bg=C["surface3"], fg=C["text"],
+            buttonbackground=C["surface3"],
+            insertbackground=C["text"],
+            relief="flat", bd=0,
+            highlightthickness=1, highlightbackground=C["border"],
             command=lambda f=field: update_cb(f),
         )
         spin.bind("<Return>", lambda e, f=field: update_cb(f))
-        spin.pack(side="left", padx=(3, 10))
+        spin.pack(side="left", padx=(3, 8))
 
-        label(ctrl, "Font", font_size=8, color=C["subtext"], bg=bg).pack(side="left")
+        tk.Label(r2, text="Font", font=("Segoe UI", 7),
+                 fg=C["subtext"], bg=bg).pack(side="left")
         cb = ttk.Combobox(
-            ctrl, values=available_fonts,
+            r2, values=available_fonts,
             textvariable=font_settings[field]["font_name"],
-            width=12, state="readonly", style="Flat.TCombobox",
+            width=11, state="readonly", style="Flat.TCombobox",
         )
         cb.bind("<<ComboboxSelected>>", lambda e, f=field: update_cb(f))
-        cb.pack(side="left", padx=(3, 8))
+        cb.pack(side="left", padx=(3, 0))
 
-        swatch = tk.Label(
-            ctrl, width=2, height=1,
+        # ── Row 3: colour swatch + alignment ────────────
+        r3 = tk.Frame(pad, bg=bg)
+        r3.pack(fill="x")
+
+        # colour swatch button
+        swatch = tk.Button(
+            r3,
+            width=3, height=1,
             bg=font_settings[field]["color"].get(),
-            relief="flat", bd=1,
-            highlightthickness=1, highlightbackground=C["border"],
+            relief="flat", bd=0, cursor="hand2",
+            highlightthickness=2,
+            highlightbackground=C["border"],
+            command=lambda f=field: color_cb(f),
         )
-        swatch.pack(side="left", padx=(0, 3))
+        swatch.pack(side="left", padx=(0, 6))
         font_settings[field]["_swatch"] = swatch
 
-        tk.Button(
-            ctrl, text="Color",
-            command=lambda f=field: color_cb(f),
-            bg="#e8eaf0", fg=C["text"],
-            relief="flat", bd=0, cursor="hand2",
-            font=("Segoe UI", 8),
-            activebackground="#d0d4df",
-            padx=7, pady=2,
-        ).pack(side="left")
+        tk.Label(r3, text="Color", font=("Segoe UI", 7),
+                 fg=C["subtext"], bg=bg).pack(side="left", padx=(0, 10))
 
-        # ── Row 3: alignment toggle buttons ─────────────────────────────
-        align_row = tk.Frame(self, bg=bg)
-        align_row.pack(fill="x", pady=(2, 0))
-        label(align_row, "Align", font_size=8,
-              color=C["subtext"], bg=bg).pack(side="left")
+        # alignment pill buttons
+        tk.Label(r3, text="Align", font=("Segoe UI", 7),
+                 fg=C["subtext"], bg=bg).pack(side="left", padx=(0, 4))
 
-        align_var = font_settings[field]["align"]
-
-        btn_refs = {}   # keep refs so we can highlight the active one
+        align_var  = font_settings[field]["align"]
+        pill_refs  = {}
 
         def _set_align(val, f=field):
             align_var.set(val)
-            for v, b in btn_refs.items():
+            for v, b in pill_refs.items():
                 b.config(
-                    bg=C["accent"]  if v == val else "#e8eaf0",
-                    fg=C["white"]   if v == val else C["text"],
+                    bg=C["btn_active"] if v == val else C["btn_idle"],
+                    fg=C["white"]      if v == val else C["subtext"],
                 )
             update_cb(f)
 
-        btn_frame = tk.Frame(align_row, bg=bg)
-        btn_frame.pack(side="left", padx=(6, 0))
-
-        for opt in _ALIGN_OPTIONS:
+        for symbol, val in _ALIGN_OPTIONS:
+            active = (align_var.get() == val)
             b = tk.Button(
-                btn_frame,
-                text=f" {opt.capitalize()} ",
-                command=lambda v=opt: _set_align(v),
-                bg=C["accent"] if align_var.get() == opt else "#e8eaf0",
-                fg=C["white"]  if align_var.get() == opt else C["text"],
+                r3, text=symbol,
+                command=lambda v=val: _set_align(v),
+                bg=C["btn_active"] if active else C["btn_idle"],
+                fg=C["white"]      if active else C["subtext"],
+                font=("Segoe UI", 8, "bold"),
                 relief="flat", bd=0, cursor="hand2",
-                font=("Segoe UI", 8),
                 activebackground=C["accent2"],
                 activeforeground=C["white"],
-                padx=6, pady=2,
+                width=2, pady=1,
             )
             b.pack(side="left", padx=(0, 2))
-            btn_refs[opt] = b
+            pill_refs[val] = b
+
+
+# ---------------------------------------------------------------------------
+# Mini toggle switch widget
+# ---------------------------------------------------------------------------
+class _ToggleSwitch(tk.Canvas):
+    """
+    A small on/off toggle that wraps a BooleanVar.
+    Width=32, Height=16.
+    """
+    W, H, R = 32, 16, 8
+
+    def __init__(self, parent, var: tk.BooleanVar, command, bg="#ffffff"):
+        super().__init__(parent, width=self.W, height=self.H,
+                         bg=bg, highlightthickness=0, cursor="hand2")
+        self._var = var
+        self._cmd = command
+        self.bind("<Button-1>", self._toggle)
+        var.trace_add("write", lambda *_: self._draw())
+        self._draw()
+
+    def _draw(self):
+        self.delete("all")
+        on = self._var.get()
+        track = C["accent"] if on else C["surface3"]
+        knob  = C["white"]
+        # track
+        self.create_rounded_rect(0, 0, self.W, self.H, self.R, fill=track)
+        # knob
+        kx = self.W - self.R - 2 if on else self.R + 2
+        ky = self.H // 2
+        self.create_oval(
+            kx - 5, ky - 5, kx + 5, ky + 5,
+            fill=knob, outline="",
+        )
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kw):
+        self.create_arc(x1, y1, x1+2*r, y1+2*r, start=90,  extent=90,  style="pieslice", outline="", **kw)
+        self.create_arc(x2-2*r, y1, x2, y1+2*r, start=0,   extent=90,  style="pieslice", outline="", **kw)
+        self.create_arc(x1, y2-2*r, x1+2*r, y2, start=180, extent=90,  style="pieslice", outline="", **kw)
+        self.create_arc(x2-2*r, y2-2*r, x2, y2, start=270, extent=90,  style="pieslice", outline="", **kw)
+        self.create_rectangle(x1+r, y1, x2-r, y2, outline="", **kw)
+        self.create_rectangle(x1, y1+r, x2, y2-r, outline="", **kw)
+
+    def _toggle(self, _event=None):
+        self._var.set(not self._var.get())
+        if self._cmd:
+            self._cmd()
