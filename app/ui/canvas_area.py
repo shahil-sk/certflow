@@ -1,7 +1,10 @@
 """
 Right-side canvas frame: displays the template and draggable text placeholders.
+Supports scroll (mousewheel + scrollbars) for templates larger than the view.
 """
+import platform
 import tkinter as tk
+from tkinter import ttk
 
 from PIL import ImageTk
 
@@ -28,20 +31,43 @@ class CanvasArea(tk.Frame):
         )
         self.pack(side="left", fill="both", expand=True, pady=6)
 
-        self._canvas = tk.Canvas(self, bg=C["bg"], highlightthickness=0)
-        self._canvas.pack(fill="both", expand=True, padx=1, pady=1)
+        self._build_canvas()
 
         self._scale_x = self._scale_y = 1.0
-        self._display_image = None   # keep ImageTk ref alive
-        self._ph_images: dict = {}   # field -> ImageTk.PhotoImage
-        self._placeholders: dict = {}  # field -> {item, x, y}
+        self._display_image = None
+        self._ph_images: dict = {}
+        self._placeholders: dict = {}
         self._drag: dict = {}
 
         # state injected by App after Excel load
-        self.font_settings:  dict = {}
+        self.font_settings:   dict = {}
         self.available_fonts: dict = {}
         self.excel_data:      list = []
         self.fields:          list = []
+
+    # ------------------------------------------------------------------
+    def _build_canvas(self) -> None:
+        self._h_scroll = ttk.Scrollbar(
+            self, orient="horizontal",
+            style="Flat.Vertical.TScrollbar")
+        self._v_scroll = ttk.Scrollbar(
+            self, orient="vertical",
+            style="Flat.Vertical.TScrollbar")
+
+        self._canvas = tk.Canvas(
+            self, bg=C["bg"], highlightthickness=0,
+            xscrollcommand=self._h_scroll.set,
+            yscrollcommand=self._v_scroll.set,
+        )
+        self._h_scroll.config(command=self._canvas.xview)
+        self._v_scroll.config(command=self._canvas.yview)
+
+        self._h_scroll.pack(side="bottom", fill="x")
+        self._v_scroll.pack(side="right",  fill="y")
+        self._canvas.pack(fill="both", expand=True, padx=1, pady=1)
+
+        self._canvas.bind("<Enter>", self._bind_scroll)
+        self._canvas.bind("<Leave>", self._unbind_scroll)
 
     # ------------------------------------------------------------------
     @property
@@ -52,7 +78,7 @@ class CanvasArea(tk.Frame):
 
     # ------------------------------------------------------------------
     def load_image(self, pil_image) -> None:
-        """Scale image to fit canvas area and redraw it."""
+        """Scale image to fit the canvas view and redraw it."""
         ow, oh = pil_image.size
         ratio  = min(CANVAS_MAX_W / ow, CANVAS_MAX_H / oh)
         nw, nh = int(ow * ratio), int(oh * ratio)
@@ -60,7 +86,11 @@ class CanvasArea(tk.Frame):
 
         self._display_image = ImageTk.PhotoImage(
             pil_image.resize((nw, nh), pil_image.LANCZOS))
-        self._canvas.config(width=nw, height=nh)
+        self._canvas.config(
+            width=min(nw, CANVAS_MAX_W),
+            height=min(nh, CANVAS_MAX_H),
+            scrollregion=(0, 0, nw, nh),
+        )
         self._canvas.delete("all")
         self._canvas.create_image(0, 0, image=self._display_image, anchor="nw")
 
@@ -110,6 +140,51 @@ class CanvasArea(tk.Frame):
         self._placeholders.clear()
         self._ph_images.clear()
 
+    # ------------------------------------------------------------------
+    # Scroll handling
+    # ------------------------------------------------------------------
+    def _bind_scroll(self, _event=None) -> None:
+        system = platform.system()
+        if system == "Windows":
+            self._canvas.bind_all("<MouseWheel>",    self._scroll_y)
+            self._canvas.bind_all("<Shift-MouseWheel>", self._scroll_x)
+        elif system == "Darwin":
+            self._canvas.bind_all("<MouseWheel>",    self._scroll_y_mac)
+            self._canvas.bind_all("<Shift-MouseWheel>", self._scroll_x_mac)
+        else:  # Linux
+            self._canvas.bind_all("<Button-4>",  self._scroll_up)
+            self._canvas.bind_all("<Button-5>",  self._scroll_down)
+            self._canvas.bind_all("<Shift-Button-4>", self._scroll_left)
+            self._canvas.bind_all("<Shift-Button-5>", self._scroll_right)
+
+    def _unbind_scroll(self, _event=None) -> None:
+        for seq in ("<MouseWheel>", "<Shift-MouseWheel>",
+                    "<Button-4>", "<Button-5>",
+                    "<Shift-Button-4>", "<Shift-Button-5>"):
+            try:
+                self._canvas.unbind_all(seq)
+            except Exception:
+                pass
+
+    def _scroll_y(self, event):
+        self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _scroll_x(self, event):
+        self._canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _scroll_y_mac(self, event):
+        self._canvas.yview_scroll(int(-1 * event.delta), "units")
+
+    def _scroll_x_mac(self, event):
+        self._canvas.xview_scroll(int(-1 * event.delta), "units")
+
+    def _scroll_up(self,    _e): self._canvas.yview_scroll(-1, "units")
+    def _scroll_down(self,  _e): self._canvas.yview_scroll( 1, "units")
+    def _scroll_left(self,  _e): self._canvas.xview_scroll(-1, "units")
+    def _scroll_right(self, _e): self._canvas.xview_scroll( 1, "units")
+
+    # ------------------------------------------------------------------
+    # Drag handling
     # ------------------------------------------------------------------
     def _drag_start(self, event, item) -> None:
         self._drag = {"item": item, "x": event.x, "y": event.y}
