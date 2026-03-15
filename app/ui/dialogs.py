@@ -10,6 +10,8 @@ from app.constants import C
 from app.helpers import cmyk_to_hex
 from app.ui.widgets import flat_button, label
 
+_LANCZOS = Image.Resampling.LANCZOS
+
 
 def show_preview(
     parent: tk.Tk,
@@ -31,7 +33,7 @@ def show_preview(
     iw, ih  = img.size
     ratio   = min(pw / iw, ph / ih)
     photo   = ImageTk.PhotoImage(
-        img.resize((int(iw * ratio), int(ih * ratio)), Image.LANCZOS))
+        img.resize((int(iw * ratio), int(ih * ratio)), _LANCZOS))
 
     lbl = tk.Label(win, image=photo, bg=C["bg"], bd=0)
     lbl.image = photo

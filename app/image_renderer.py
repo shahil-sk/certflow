@@ -9,6 +9,8 @@ from PIL import Image, ImageDraw
 from app.helpers import hex_to_rgb
 from app.font_manager import resolve_font
 
+_LANCZOS = Image.Resampling.LANCZOS
+
 
 def draw_text_on_image(
     img: Image.Image,
@@ -87,7 +89,7 @@ def render_placeholder(
 
     sw = max(int(tw / scale_x), 1)
     sh = max(int(th / scale_y), 1)
-    return img.resize((sw, sh), Image.LANCZOS)
+    return img.resize((sw, sh), _LANCZOS)
 
 
 def image_to_bytes(img: Image.Image) -> bytes:

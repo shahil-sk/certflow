@@ -6,10 +6,12 @@ import platform
 import tkinter as tk
 from tkinter import ttk
 
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from app.constants import C, CANVAS_MAX_W, CANVAS_MAX_H
 from app.image_renderer import render_placeholder
+
+_LANCZOS = Image.Resampling.LANCZOS
 
 
 class CanvasArea(tk.Frame):
@@ -85,7 +87,7 @@ class CanvasArea(tk.Frame):
         self._scale_x, self._scale_y = ow / nw, oh / nh
 
         self._display_image = ImageTk.PhotoImage(
-            pil_image.resize((nw, nh), pil_image.LANCZOS))
+            pil_image.resize((nw, nh), _LANCZOS))
         self._canvas.config(
             width=min(nw, CANVAS_MAX_W),
             height=min(nh, CANVAS_MAX_H),
@@ -146,16 +148,16 @@ class CanvasArea(tk.Frame):
     def _bind_scroll(self, _event=None) -> None:
         system = platform.system()
         if system == "Windows":
-            self._canvas.bind_all("<MouseWheel>",    self._scroll_y)
+            self._canvas.bind_all("<MouseWheel>",       self._scroll_y)
             self._canvas.bind_all("<Shift-MouseWheel>", self._scroll_x)
         elif system == "Darwin":
-            self._canvas.bind_all("<MouseWheel>",    self._scroll_y_mac)
+            self._canvas.bind_all("<MouseWheel>",       self._scroll_y_mac)
             self._canvas.bind_all("<Shift-MouseWheel>", self._scroll_x_mac)
         else:  # Linux
-            self._canvas.bind_all("<Button-4>",  self._scroll_up)
-            self._canvas.bind_all("<Button-5>",  self._scroll_down)
-            self._canvas.bind_all("<Shift-Button-4>", self._scroll_left)
-            self._canvas.bind_all("<Shift-Button-5>", self._scroll_right)
+            self._canvas.bind_all("<Button-4>",         self._scroll_up)
+            self._canvas.bind_all("<Button-5>",         self._scroll_down)
+            self._canvas.bind_all("<Shift-Button-4>",   self._scroll_left)
+            self._canvas.bind_all("<Shift-Button-5>",   self._scroll_right)
 
     def _unbind_scroll(self, _event=None) -> None:
         for seq in ("<MouseWheel>", "<Shift-MouseWheel>",
