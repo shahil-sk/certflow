@@ -8,11 +8,14 @@ from tkinter import ttk
 from app.constants import C
 from app.ui.widgets import label
 
+_ALIGN_OPTIONS = ["left", "center", "right"]
+_ALIGN_ICONS   = {"left": "\u2b05", "center": "\u2b0c", "right": "\u27a1"}  # ← ⬌ ➡
+
 
 class FieldList(tk.Frame):
     """
     Drop-in replacement for the old fields_frame_outer.
-    Call .rebuild(fields, field_vars, font_settings, update_cb) to refresh.
+    Call .rebuild(...) to refresh after Excel load.
     """
 
     def __init__(self, parent):
@@ -25,14 +28,14 @@ class FieldList(tk.Frame):
         field_vars: dict,
         font_settings: dict,
         available_fonts: list,
-        update_cb,   # callable(field_name)
-        color_cb,    # callable(field_name)
+        update_cb,
+        color_cb,
     ) -> None:
         for w in self.winfo_children():
             w.destroy()
 
         scroll_cv = tk.Canvas(
-            self, height=260, bg=C["surface"], highlightthickness=0)
+            self, height=310, bg=C["surface"], highlightthickness=0)
         vsb = ttk.Scrollbar(
             self, orient="vertical", command=scroll_cv.yview,
             style="Flat.Vertical.TScrollbar")
@@ -45,6 +48,14 @@ class FieldList(tk.Frame):
         scroll_cv.create_window((0, 0), window=inner, anchor="nw")
         scroll_cv.configure(yscrollcommand=vsb.set)
 
+        # bind mousewheel on the inner list
+        scroll_cv.bind("<Enter>",
+            lambda e, cv=scroll_cv: cv.bind_all(
+                "<MouseWheel>",
+                lambda ev: cv.yview_scroll(int(-1*(ev.delta/120)), "units")))
+        scroll_cv.bind("<Leave>",
+            lambda e, cv=scroll_cv: cv.unbind_all("<MouseWheel>"))
+
         for i, field in enumerate(fields):
             _FieldRow(inner, field, field_vars, font_settings,
                       available_fonts, update_cb, color_cb,
@@ -55,7 +66,7 @@ class FieldList(tk.Frame):
 
 
 class _FieldRow(tk.Frame):
-    """One row in the field list (not exported; used only by FieldList)."""
+    """One row in the field list."""
 
     def __init__(
         self, parent, field, field_vars, font_settings,
@@ -69,9 +80,10 @@ class _FieldRow(tk.Frame):
 
     def _build(self, field, field_vars, font_settings,
                available_fonts, update_cb, color_cb, bg):
-        # Row header: field name + visibility toggle
+
+        # ── Row 1: field name + visibility toggle ───────────────────────
         top = tk.Frame(self, bg=bg)
-        top.pack(fill="x", pady=(0, 5))
+        top.pack(fill="x", pady=(0, 4))
         label(top, field.title(), font_size=9, bold=True, bg=bg).pack(side="left")
         label(top, "Visible", font_size=8, color=C["subtext"],
               bg=bg).pack(side="right", padx=(0, 2))
@@ -81,9 +93,9 @@ class _FieldRow(tk.Frame):
             command=lambda f=field: update_cb(f),
         ).pack(side="right")
 
-        # Controls row
+        # ── Row 2: size + font + colour ──────────────────────────────────
         ctrl = tk.Frame(self, bg=bg)
-        ctrl.pack(fill="x")
+        ctrl.pack(fill="x", pady=(0, 4))
 
         label(ctrl, "Size", font_size=8, color=C["subtext"], bg=bg).pack(side="left")
         spin = tk.Spinbox(
@@ -122,3 +134,41 @@ class _FieldRow(tk.Frame):
             activebackground="#d0d4df",
             padx=7, pady=2,
         ).pack(side="left")
+
+        # ── Row 3: alignment toggle buttons ─────────────────────────────
+        align_row = tk.Frame(self, bg=bg)
+        align_row.pack(fill="x", pady=(2, 0))
+        label(align_row, "Align", font_size=8,
+              color=C["subtext"], bg=bg).pack(side="left")
+
+        align_var = font_settings[field]["align"]
+
+        btn_refs = {}   # keep refs so we can highlight the active one
+
+        def _set_align(val, f=field):
+            align_var.set(val)
+            for v, b in btn_refs.items():
+                b.config(
+                    bg=C["accent"]  if v == val else "#e8eaf0",
+                    fg=C["white"]   if v == val else C["text"],
+                )
+            update_cb(f)
+
+        btn_frame = tk.Frame(align_row, bg=bg)
+        btn_frame.pack(side="left", padx=(6, 0))
+
+        for opt in _ALIGN_OPTIONS:
+            b = tk.Button(
+                btn_frame,
+                text=f" {opt.capitalize()} ",
+                command=lambda v=opt: _set_align(v),
+                bg=C["accent"] if align_var.get() == opt else "#e8eaf0",
+                fg=C["white"]  if align_var.get() == opt else C["text"],
+                relief="flat", bd=0, cursor="hand2",
+                font=("Segoe UI", 8),
+                activebackground=C["accent2"],
+                activeforeground=C["white"],
+                padx=6, pady=2,
+            )
+            b.pack(side="left", padx=(0, 2))
+            btn_refs[opt] = b

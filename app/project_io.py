@@ -4,12 +4,11 @@ No UI calls here — caller is responsible for showing dialogs.
 """
 import json
 from datetime import datetime
-from typing import Any
 
 
 def serialise(
-    template_path: str | None,
-    excel_path: str | None,
+    template_path,
+    excel_path,
     color_space: str,
     positions: dict,
     fields: list,
@@ -18,7 +17,7 @@ def serialise(
 ) -> dict:
     """Return a plain dict ready for json.dump."""
     return {
-        "version":        "2.1",
+        "version":        "2.2",
         "last_modified":  datetime.now().isoformat(),
         "template_path":  template_path,
         "excel_path":     excel_path,
@@ -30,6 +29,7 @@ def serialise(
                 "color":     font_settings[f]["color"].get(),
                 "visible":   field_vars[f].get(),
                 "font_name": font_settings[f]["font_name"].get(),
+                "align":     font_settings[f]["align"].get(),
             }
             for f in fields
         },

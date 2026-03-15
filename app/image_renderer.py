@@ -11,6 +11,30 @@ from app.font_manager import resolve_font
 
 _LANCZOS = Image.Resampling.LANCZOS
 
+# Mapping: alignment string -> PIL anchor string
+# PIL anchor: first char = horizontal (l/m/r), second = vertical (a/m/d)
+_ANCHOR = {
+    "left":   "lm",
+    "center": "mm",
+    "right":  "rm",
+}
+
+
+def _draw_offset(align: str, tw: float, x: float) -> float:
+    """
+    Return the x coordinate to pass to draw.text().
+    PIL anchors handle the horizontal shift themselves, but we still need
+    to map the placeholder pin-point (x) correctly:
+      left   -> x is the left edge of the text
+      center -> x is the centre of the text
+      right  -> x is the right edge of the text
+    """
+    if align == "left":
+        return x
+    if align == "right":
+        return x
+    return x   # center: anchor="mm" handles it
+
 
 def draw_text_on_image(
     img: Image.Image,
@@ -30,27 +54,36 @@ def draw_text_on_image(
         if field not in positions:
             continue
         try:
-            x, y  = positions[field]
-            s     = font_settings[field]
-            size  = s["size"].get()
-            color = s["color"].get()
-            fname = s["font_name"].get()
-            font  = resolve_font(available_fonts, fname, size)
-            text  = student.get(field, "")
-            tw    = draw.textlength(text, font=font)
-            try:
-                bbox = font.getbbox(text)
-                th   = bbox[3] - bbox[1]
-                yo   = (size - th) // 2
-            except Exception:
-                yo = 0
+            x, y   = positions[field]
+            s      = font_settings[field]
+            size   = s["size"].get()
+            color  = s["color"].get()
+            fname  = s["font_name"].get()
+            align  = s.get("align", tk_str_or_default(s, "align", "center"))
+            font   = resolve_font(available_fonts, fname, size)
+            text   = student.get(field, "")
+            anchor = _ANCHOR.get(align, "mm")
             draw.text(
-                (x - tw / 2, y - size / 2 + yo),
-                text, font=font, fill=hex_to_rgb(color),
+                (x, y),
+                text,
+                font=font,
+                fill=hex_to_rgb(color),
+                anchor=anchor,
             )
         except Exception as exc:
             print(f"[renderer] {field}: {exc}")
     return img
+
+
+def tk_str_or_default(settings: dict, key: str, default: str) -> str:
+    """Safely read a StringVar or plain str from a font_settings sub-dict."""
+    val = settings.get(key)
+    if val is None:
+        return default
+    try:
+        return val.get()
+    except AttributeError:
+        return str(val)
 
 
 def render_placeholder(

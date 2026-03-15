@@ -25,6 +25,8 @@ from app.ui.field_row import FieldList
 from app.ui.canvas_area import CanvasArea
 from app.ui.dialogs import show_preview, pick_color_rgb, pick_color_cmyk
 
+_DEFAULT_ALIGN = "center"
+
 
 class CertificateApp:
 
@@ -153,6 +155,7 @@ class CertificateApp:
                 "size":      tk.IntVar(value=DEFAULT_FONT_SIZE),
                 "color":     tk.StringVar(value="#000000"),
                 "font_name": tk.StringVar(value=default_font),
+                "align":     tk.StringVar(value=_DEFAULT_ALIGN),
             } for f in header
         }
 
@@ -188,7 +191,6 @@ class CertificateApp:
         else:
             pick_color_cmyk(self.root, field, self.font_settings)
         self._canvas_area.update_placeholder(field)
-        # Refresh the colour swatch in the field row
         swatch = self.font_settings[field].get("_swatch")
         if swatch:
             col = self.font_settings[field]["color"].get()
@@ -324,6 +326,8 @@ class CertificateApp:
                 self.font_settings[f]["color"].set(fs[f].get("color", "#000000"))
                 self.font_settings[f]["font_name"].set(
                     fs[f].get("font_name", next(iter(self.available_fonts))))
+                self.font_settings[f]["align"].set(
+                    fs[f].get("align", _DEFAULT_ALIGN))
                 self.field_vars[f].set(fs[f].get("visible", True))
 
         for field, (sx, sy) in data.get("positions", {}).items():
@@ -337,7 +341,7 @@ class CertificateApp:
         messagebox.showinfo("Loaded", "Project loaded.")
 
     # ------------------------------------------------------------------
-    # Legacy aliases (keeps old .certwiz / external references working)
+    # Legacy aliases
     # ------------------------------------------------------------------
     def _update_status(self, msg): self._status(msg)
     def update_status(self, msg):  self._status(msg)
