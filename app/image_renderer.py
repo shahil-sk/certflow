@@ -11,8 +11,7 @@ from app.font_manager import resolve_font
 
 _LANCZOS = Image.Resampling.LANCZOS
 
-# Mapping: alignment string -> PIL anchor string
-# PIL anchor: first char = horizontal (l/m/r), second = vertical (a/m/d)
+# PIL anchor: first char = horizontal (l/m/r), second = vertical (m = middle)
 _ANCHOR = {
     "left":   "lm",
     "center": "mm",
@@ -20,20 +19,12 @@ _ANCHOR = {
 }
 
 
-def _draw_offset(align: str, tw: float, x: float) -> float:
-    """
-    Return the x coordinate to pass to draw.text().
-    PIL anchors handle the horizontal shift themselves, but we still need
-    to map the placeholder pin-point (x) correctly:
-      left   -> x is the left edge of the text
-      center -> x is the centre of the text
-      right  -> x is the right edge of the text
-    """
-    if align == "left":
-        return x
-    if align == "right":
-        return x
-    return x   # center: anchor="mm" handles it
+def _get(var, default=""):
+    """Read a tkinter StringVar/IntVar or plain value safely."""
+    try:
+        return var.get()
+    except AttributeError:
+        return var if var is not None else default
 
 
 def draw_text_on_image(
@@ -49,17 +40,17 @@ def draw_text_on_image(
     draw = ImageDraw.Draw(img)
     for field in fields:
         var = field_vars.get(field)
-        if var is None or not var.get():
+        if var is None or not _get(var):
             continue
         if field not in positions:
             continue
         try:
             x, y   = positions[field]
             s      = font_settings[field]
-            size   = s["size"].get()
-            color  = s["color"].get()
-            fname  = s["font_name"].get()
-            align  = s.get("align", tk_str_or_default(s, "align", "center"))
+            size   = _get(s["size"], 32)
+            color  = _get(s["color"], "#000000")
+            fname  = _get(s["font_name"], "")
+            align  = _get(s.get("align"), "center")
             font   = resolve_font(available_fonts, fname, size)
             text   = student.get(field, "")
             anchor = _ANCHOR.get(align, "mm")
@@ -75,17 +66,6 @@ def draw_text_on_image(
     return img
 
 
-def tk_str_or_default(settings: dict, key: str, default: str) -> str:
-    """Safely read a StringVar or plain str from a font_settings sub-dict."""
-    val = settings.get(key)
-    if val is None:
-        return default
-    try:
-        return val.get()
-    except AttributeError:
-        return str(val)
-
-
 def render_placeholder(
     field: str,
     font_settings: dict,
@@ -96,9 +76,9 @@ def render_placeholder(
 ) -> Image.Image:
     """Return a PIL Image of the sample text scaled for canvas display."""
     s     = font_settings[field]
-    size  = s["size"].get()
-    color = s["color"].get()
-    fname = s["font_name"].get()
+    size  = _get(s["size"], 32)
+    color = _get(s["color"], "#000000")
+    fname = _get(s["font_name"], "")
     font  = resolve_font(available_fonts, fname, size)
     text  = (excel_data[0].get(field, field) if excel_data else field) or field
 
