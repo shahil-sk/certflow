@@ -19,22 +19,23 @@ def draw_text_on_image(
     student: dict,
     positions: dict,
 ) -> Image.Image:
-    """Render all visible field text onto a copy of img and return it."""
+    """Render all visible field text onto img and return it."""
     draw = ImageDraw.Draw(img)
     for field in fields:
-        if not field_vars.get(field, lambda: False)():
+        var = field_vars.get(field)
+        if var is None or not var.get():
             continue
         if field not in positions:
             continue
         try:
-            x, y   = positions[field]
-            s      = font_settings[field]
-            size   = s["size"].get()
-            color  = s["color"].get()
-            fname  = s["font_name"].get()
-            font   = resolve_font(available_fonts, fname, size)
-            text   = student.get(field, "")
-            tw     = draw.textlength(text, font=font)
+            x, y  = positions[field]
+            s     = font_settings[field]
+            size  = s["size"].get()
+            color = s["color"].get()
+            fname = s["font_name"].get()
+            font  = resolve_font(available_fonts, fname, size)
+            text  = student.get(field, "")
+            tw    = draw.textlength(text, font=font)
             try:
                 bbox = font.getbbox(text)
                 th   = bbox[3] - bbox[1]
@@ -57,8 +58,8 @@ def render_placeholder(
     excel_data: list,
     scale_x: float,
     scale_y: float,
-):
-    """Return a PIL Image of the sample text at canvas scale."""
+) -> Image.Image:
+    """Return a PIL Image of the sample text scaled for canvas display."""
     s     = font_settings[field]
     size  = s["size"].get()
     color = s["color"].get()
@@ -89,8 +90,8 @@ def render_placeholder(
     return img.resize((sw, sh), Image.LANCZOS)
 
 
-def image_to_pdf_bytes(img: Image.Image) -> bytes:
-    """Save a PIL image to an in-memory PNG buffer and return the raw bytes."""
+def image_to_bytes(img: Image.Image) -> bytes:
+    """Encode a PIL image as PNG bytes in memory (no temp files)."""
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
