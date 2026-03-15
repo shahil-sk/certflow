@@ -2,19 +2,22 @@
 Right-side canvas frame: template + draggable text placeholders.
 Features:
   - Scroll (mousewheel + scrollbars)
-  - Row preview switcher (← row N/total →) in a toolbar above the canvas
-  - Ctrl+Scroll zoom (25% – 200%)
+  - Row preview switcher in toolbar
+  - Ctrl+Scroll zoom (30% - 200%)
+  - Undo / Redo for placeholder positions (Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z)
 """
 import platform
 import tkinter as tk
 from tkinter import ttk
+from collections import deque
 
 from PIL import Image, ImageTk
 
 from app.constants import C, CANVAS_MAX_W, CANVAS_MAX_H
 from app.image_renderer import render_placeholder
 
-_LANCZOS = Image.Resampling.LANCZOS
+_LANCZOS   = Image.Resampling.LANCZOS
+_MAX_UNDO  = 50
 
 
 class CanvasArea(tk.Frame):
@@ -28,14 +31,16 @@ class CanvasArea(tk.Frame):
 
         self._scale_x = self._scale_y = 1.0
         self._zoom    = 1.0
-        self._pil_image = None          # original PIL image (unscaled)
+        self._pil_image     = None
         self._display_image = None
-        self._ph_images: dict = {}
+        self._ph_images:    dict = {}
         self._placeholders: dict = {}
-        self._drag: dict = {}
+        self._drag:         dict = {}
+        self._preview_idx   = 0
 
-        # preview row state
-        self._preview_idx = 0
+        # undo / redo stacks: each entry is a snapshot {field: (x,y)}
+        self._undo_stack: deque = deque(maxlen=_MAX_UNDO)
+        self._redo_stack: deque = deque(maxlen=_MAX_UNDO)
 
         # injected by App
         self.font_settings:   dict = {}
@@ -47,21 +52,31 @@ class CanvasArea(tk.Frame):
         self._build_canvas()
 
     # ------------------------------------------------------------------
-    # Toolbar (row preview switcher)
+    # Toolbar
     # ------------------------------------------------------------------
     def _build_toolbar(self) -> None:
         tb = tk.Frame(self, bg=C["nav"], height=32)
         tb.pack(fill="x")
         tb.pack_propagate(False)
 
-        # Left: zoom label
         self._zoom_label = tk.Label(
             tb, text="100%",
             font=("Segoe UI", 8), fg=C["subtext"], bg=C["nav"],
         )
         self._zoom_label.pack(side="left", padx=10)
 
-        # Centre: row navigator
+        # undo / redo buttons
+        for txt, cmd in (("\u21b6", self.undo), ("\u21b7", self.redo)):
+            tk.Button(
+                tb, text=txt, command=cmd,
+                bg=C["nav"], fg=C["subtext"],
+                relief="flat", bd=0, cursor="hand2",
+                font=("Segoe UI", 11),
+                activebackground=C["surface"],
+                activeforeground=C["text"],
+                padx=6, pady=2,
+            ).pack(side="left", padx=(0, 2))
+
         nav = tk.Frame(tb, bg=C["nav"])
         nav.pack(side="left", expand=True)
 
@@ -77,15 +92,13 @@ class CanvasArea(tk.Frame):
         _btn("◄", self._prev_row).pack(side="left")
         self._row_label = tk.Label(
             nav, text="row —",
-            font=("Segoe UI", 8), fg=C["text"], bg=C["nav"],
-            width=12,
+            font=("Segoe UI", 8), fg=C["text"], bg=C["nav"], width=12,
         )
         self._row_label.pack(side="left", padx=4)
         _btn("►", self._next_row).pack(side="left")
 
-        # Right: hint
         tk.Label(
-            tb, text="Ctrl+scroll to zoom",
+            tb, text="Ctrl+scroll=zoom  Ctrl+Z=undo",
             font=("Segoe UI", 7), fg=C["muted"], bg=C["nav"],
         ).pack(side="right", padx=10)
 
@@ -94,11 +107,9 @@ class CanvasArea(tk.Frame):
     # ------------------------------------------------------------------
     def _build_canvas(self) -> None:
         self._h_scroll = ttk.Scrollbar(
-            self, orient="horizontal",
-            style="Dark.Horizontal.TScrollbar")
+            self, orient="horizontal", style="Dark.Horizontal.TScrollbar")
         self._v_scroll = ttk.Scrollbar(
-            self, orient="vertical",
-            style="Dark.Vertical.TScrollbar")
+            self, orient="vertical",   style="Dark.Vertical.TScrollbar")
 
         self._canvas = tk.Canvas(
             self, bg=C["canvas_bg"], highlightthickness=0,
@@ -115,8 +126,13 @@ class CanvasArea(tk.Frame):
         self._canvas.bind("<Enter>", self._bind_scroll)
         self._canvas.bind("<Leave>", self._unbind_scroll)
 
-    # ------------------------------------------------------------------
-    # Properties
+        # Keyboard shortcuts
+        self._canvas.bind_all("<Control-z>", lambda e: self.undo())
+        self._canvas.bind_all("<Control-Z>", lambda e: self.undo())
+        self._canvas.bind_all("<Control-y>", lambda e: self.redo())
+        self._canvas.bind_all("<Control-Y>", lambda e: self.redo())
+        self._canvas.bind_all("<Control-Shift-z>", lambda e: self.redo())
+
     # ------------------------------------------------------------------
     @property
     def scale_x(self): return self._scale_x
@@ -128,7 +144,7 @@ class CanvasArea(tk.Frame):
     # Image loading
     # ------------------------------------------------------------------
     def load_image(self, pil_image) -> None:
-        self._pil_image = pil_image
+        self._pil_image   = pil_image
         self._preview_idx = 0
         self._redraw_image()
 
@@ -137,19 +153,13 @@ class CanvasArea(tk.Frame):
             return
         ow, oh = self._pil_image.size
         base_ratio = min(CANVAS_MAX_W / ow, CANVAS_MAX_H / oh)
-        ratio = base_ratio * self._zoom
-        nw, nh = max(int(ow * ratio), 1), max(int(oh * ratio), 1)
-        self._scale_x = ow / nw * self._zoom
-        self._scale_y = oh / nh * self._zoom
-        # Keep the "logical" scale for position mapping:
-        # positions are stored relative to original image pixels.
-        # scale_x = original_px / canvas_px
-        self._scale_x = ow / (nw / self._zoom * self._zoom)
-        # simplify: scale is always original/canvas at base zoom
-        base_nw = max(int(ow * base_ratio), 1)
-        base_nh = max(int(oh * base_ratio), 1)
+        base_nw    = max(int(ow * base_ratio), 1)
+        base_nh    = max(int(oh * base_ratio), 1)
         self._scale_x = ow / base_nw
         self._scale_y = oh / base_nh
+
+        nw = max(int(base_nw * self._zoom), 1)
+        nh = max(int(base_nh * self._zoom), 1)
 
         self._display_image = ImageTk.PhotoImage(
             self._pil_image.resize((nw, nh), _LANCZOS))
@@ -166,15 +176,12 @@ class CanvasArea(tk.Frame):
             self.draw_placeholder(field, data["x"], data["y"])
 
     # ------------------------------------------------------------------
-    # Row preview switcher
+    # Row switcher
     # ------------------------------------------------------------------
     def _update_row_label(self) -> None:
         total = len(self.excel_data)
-        if total:
-            self._row_label.config(
-                text=f"row {self._preview_idx + 1} / {total}")
-        else:
-            self._row_label.config(text="row —")
+        self._row_label.config(
+            text=f"row {self._preview_idx + 1} / {total}" if total else "row —")
 
     def _prev_row(self) -> None:
         if not self.excel_data:
@@ -191,14 +198,42 @@ class CanvasArea(tk.Frame):
         self._refresh_all_placeholders()
 
     def _refresh_all_placeholders(self) -> None:
-        """Redraw every placeholder using the current preview row."""
         for field, data in list(self._placeholders.items()):
             self.draw_placeholder(field, data["x"], data["y"])
 
     def _current_row(self) -> dict:
-        if self.excel_data:
-            return self.excel_data[self._preview_idx]
-        return {}
+        return self.excel_data[self._preview_idx] if self.excel_data else {}
+
+    # ------------------------------------------------------------------
+    # Undo / Redo
+    # ------------------------------------------------------------------
+    def _snapshot(self) -> dict:
+        return {f: (d["x"], d["y"]) for f, d in self._placeholders.items()}
+
+    def _push_undo(self) -> None:
+        self._undo_stack.append(self._snapshot())
+        self._redo_stack.clear()
+
+    def undo(self) -> None:
+        if not self._undo_stack:
+            return
+        self._redo_stack.append(self._snapshot())
+        state = self._undo_stack.pop()
+        self._apply_snapshot(state)
+
+    def redo(self) -> None:
+        if not self._redo_stack:
+            return
+        self._undo_stack.append(self._snapshot())
+        state = self._redo_stack.pop()
+        self._apply_snapshot(state)
+
+    def _apply_snapshot(self, state: dict) -> None:
+        for field, (x, y) in state.items():
+            if field in self._placeholders:
+                self._placeholders[field]["x"] = x
+                self._placeholders[field]["y"] = y
+        self._redraw_image()
 
     # ------------------------------------------------------------------
     # Placeholder management
@@ -207,9 +242,6 @@ class CanvasArea(tk.Frame):
         if field in self._placeholders:
             self._canvas.delete(self._placeholders[field]["item"])
 
-        # Build a temporary font_settings override that uses the current row
-        # value as the preview text (render_placeholder already does this
-        # via excel_data[0] — we temporarily swap excel_data).
         saved = self.excel_data
         row   = self._current_row()
         self.excel_data = [row] if row else saved
@@ -255,6 +287,8 @@ class CanvasArea(tk.Frame):
         self._canvas.delete("all")
         self._placeholders.clear()
         self._ph_images.clear()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self._preview_idx = 0
         self._update_row_label()
 
@@ -264,18 +298,18 @@ class CanvasArea(tk.Frame):
     def _bind_scroll(self, _event=None) -> None:
         system = platform.system()
         if system == "Windows":
-            self._canvas.bind_all("<MouseWheel>",          self._on_mousewheel)
-            self._canvas.bind_all("<Shift-MouseWheel>",    self._scroll_x)
+            self._canvas.bind_all("<MouseWheel>",       self._on_mousewheel)
+            self._canvas.bind_all("<Shift-MouseWheel>", self._scroll_x)
         elif system == "Darwin":
-            self._canvas.bind_all("<MouseWheel>",          self._on_mousewheel_mac)
-            self._canvas.bind_all("<Shift-MouseWheel>",    self._scroll_x_mac)
+            self._canvas.bind_all("<MouseWheel>",       self._on_mousewheel_mac)
+            self._canvas.bind_all("<Shift-MouseWheel>", self._scroll_x_mac)
         else:
-            self._canvas.bind_all("<Button-4>",            self._scroll_up)
-            self._canvas.bind_all("<Button-5>",            self._scroll_down)
-            self._canvas.bind_all("<Shift-Button-4>",      self._scroll_left)
-            self._canvas.bind_all("<Shift-Button-5>",      self._scroll_right)
-            self._canvas.bind_all("<Control-Button-4>",    self._zoom_in)
-            self._canvas.bind_all("<Control-Button-5>",    self._zoom_out)
+            self._canvas.bind_all("<Button-4>",         self._scroll_up)
+            self._canvas.bind_all("<Button-5>",         self._scroll_down)
+            self._canvas.bind_all("<Shift-Button-4>",   self._scroll_left)
+            self._canvas.bind_all("<Shift-Button-5>",   self._scroll_right)
+            self._canvas.bind_all("<Control-Button-4>", self._zoom_in)
+            self._canvas.bind_all("<Control-Button-5>", self._zoom_out)
 
     def _unbind_scroll(self, _event=None) -> None:
         for seq in ("<MouseWheel>", "<Shift-MouseWheel>",
@@ -288,20 +322,14 @@ class CanvasArea(tk.Frame):
                 pass
 
     def _on_mousewheel(self, event):
-        if event.state & 0x0004:   # Ctrl held
-            if event.delta > 0:
-                self._zoom_in()
-            else:
-                self._zoom_out()
+        if event.state & 0x0004:
+            self._zoom_in() if event.delta > 0 else self._zoom_out()
         else:
             self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _on_mousewheel_mac(self, event):
         if event.state & 0x0004:
-            if event.delta > 0:
-                self._zoom_in()
-            else:
-                self._zoom_out()
+            self._zoom_in() if event.delta > 0 else self._zoom_out()
         else:
             self._canvas.yview_scroll(int(-1 * event.delta), "units")
 
@@ -327,9 +355,10 @@ class CanvasArea(tk.Frame):
             self._redraw_image()
 
     # ------------------------------------------------------------------
-    # Drag
+    # Drag  (pushes undo on button-release)
     # ------------------------------------------------------------------
     def _drag_start(self, event, item) -> None:
+        self._push_undo()   # snapshot before move
         self._drag = {"item": item, "x": event.x, "y": event.y}
 
     def _drag_move(self, event, item) -> None:
