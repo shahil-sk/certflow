@@ -70,7 +70,6 @@ jobs:
         run: |
           pyinstaller \
             --onefile \
-            --windowed \
             --name certwizard \
             --add-data "fonts:fonts" \
             --add-data "app:app" \
@@ -86,7 +85,6 @@ jobs:
             --onefile \
             --windowed \
             --name certwizard \
-            --icon icon.ico \
             --add-data "fonts:fonts" \
             --add-data "app:app" \
             --hidden-import PIL._tkinter_finder \
@@ -117,18 +115,19 @@ jobs:
         with:
           path: dist
 
+      # download-artifact v4 places each artifact in its own subdirectory.
+      # rename to flat filenames that are distinct from the directory names.
       - name: Rename binaries to descriptive names
         run: |
-          mv dist/certwizard-windows/certwizard.exe dist/certwizard-windows.exe
-          mv dist/certwizard-linux/certwizard       dist/certwizard-linux
-          mv dist/certwizard-macos/certwizard       dist/certwizard-macos
+          mv dist/certwizard-windows/certwizard.exe  dist/certwizard-windows.exe
+          mv dist/certwizard-linux/certwizard         dist/certwizard-linux-x86_64
+          mv dist/certwizard-macos/certwizard         dist/certwizard-macos-x86_64
 
       - name: Create release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
-          # creates the release if it does not already exist
           generate_release_notes: true
           files: |
             dist/certwizard-windows.exe
-            dist/certwizard-linux
-            dist/certwizard-macos
+            dist/certwizard-linux-x86_64
+            dist/certwizard-macos-x86_64
