@@ -1,4 +1,4 @@
-name: Build CertWizard Executables
+name: Build CertFlow Executables
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
           pyinstaller --clean --noconfirm `
             --onefile `
             --windowed `
-            --name certwizard `
+            --name CertFlow `
             --icon icon.ico `
             --add-data "fonts;fonts" `
             --add-data "app;app" `
@@ -45,8 +45,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: certwizard-windows
-          path: dist/certwizard.exe
+          name: CertFlow-windows
+          path: dist/CertFlow.exe
           retention-days: 7
 
   build-linux:
@@ -75,7 +75,7 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm \
             --onefile \
-            --name certwizard \
+            --name CertFlow \
             --add-data "fonts:fonts" \
             --add-data "app:app" \
             --hidden-import PIL._tkinter_finder \
@@ -86,8 +86,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: certwizard-linux
-          path: dist/certwizard
+          name: CertFlow-linux
+          path: dist/CertFlow
           retention-days: 7
 
   build-macos:
@@ -112,7 +112,7 @@ jobs:
           pyinstaller --clean --noconfirm \
             --onefile \
             --windowed \
-            --name certwizard \
+            --name CertFlow \
             --add-data "fonts:fonts" \
             --add-data "app:app" \
             --hidden-import PIL._tkinter_finder \
@@ -123,8 +123,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: certwizard-macos
-          path: dist/certwizard
+          name: CertFlow-macos
+          path: dist/CertFlow
           retention-days: 7
 
   release:
@@ -144,8 +144,8 @@ jobs:
       # collides with the artifact directory name itself
       - name: Rename binaries
         run: |
-          mv artifacts/certwizard-linux/certwizard   artifacts/certwizard-linux/certwizard-linux
-          mv artifacts/certwizard-macos/certwizard    artifacts/certwizard-macos/certwizard-macos
+          mv artifacts/CertFlow-linux/CertFlow   artifacts/CertFlow-linux/CertFlow-linux
+          mv artifacts/CertFlow-macos/CertFlow    artifacts/CertFlow-macos/CertFlow-macos
 
       - name: Create release
         uses: softprops/action-gh-release@v1
@@ -154,8 +154,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/certwizard-windows/certwizard.exe
-            artifacts/certwizard-linux/certwizard-linux
-            artifacts/certwizard-macos/certwizard-macos
+            artifacts/CertFlow-windows/CertFlow.exe
+            artifacts/CertFlow-linux/CertFlow-linux
+            artifacts/CertFlow-macos/CertFlow-macos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
